@@ -10,6 +10,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/vision_perception', ['resource/cutoff_yolov5s_sigmoid_w8a8.qnn229.ctx.bin','resource/test1.jpg','resource/testvideo1.mp4'
+        ]),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

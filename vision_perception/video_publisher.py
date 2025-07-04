@@ -1,16 +1,20 @@
 import rclpy
+import os
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import aidcv as cv2
+from ament_index_python.packages import get_package_share_directory
 
 class VideoPublisher(Node):
     def __init__(self):
         super().__init__('video_publisher')
         self.publisher = self.create_publisher(Image, '/camera/image_raw', 10)
         self.bridge = CvBridge()
-
-        video_path = '/home/aidlux/aidcode/test_ws/src/vision_perception/vision_perception/testvideo1.mp4'  # 修改为你的视频绝对路径
+        resource_dir = get_package_share_directory('vision_perception')
+        video_name = 'testvideo1.mp4'
+        video_path = os.path.join(resource_dir, video_name)
+        # video_path = '/home/aidlux/aidcode/test_ws/src/vision_perception/vision_perception/testvideo1.mp4'  # 修改为你的视频绝对路径
         self.cap = cv2.VideoCapture(video_path)
 
         if not self.cap.isOpened():

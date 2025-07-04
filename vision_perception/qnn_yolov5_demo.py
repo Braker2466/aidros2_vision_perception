@@ -2,7 +2,7 @@
 import os
 import sys
 import time
-
+from ament_index_python.packages import get_package_share_directory
 import aidlite
 import aidcv as cv2
 import numpy as np
@@ -215,7 +215,7 @@ def detect_postprocess(
     out_boxes = valid_condidates[index]
     clip_coords(out_boxes[:, :4], img0shape)
     out_boxes[:, :4] = xyxy2xywh(out_boxes[:, :4])
-    print("检测到{}个区域".format(len(out_boxes)))
+    # print("检测到{}个区域".format(len(out_boxes)))
     return out_boxes
 
 
@@ -299,23 +299,204 @@ class Detect:
         return np.concatenate(z, 1)
 
 
-def show_help_prompt():
-    print("python3 ./qnn_yolov5_multi.py 3 Run on the DSP")
-    return False
-
-
 def main():
-    argvs = len(sys.argv)
-    if argvs < 2:
-        return show_help_prompt()
-    acc_type = int(sys.argv[1])
+    acc_type = 3
+    # acc_type 1 cpu 2 gpu 3 npu
+    # aidlite.set_log_level(aidlite.LogLevel.INFO)
+    # aidlite.log_to_stderr()
+    # print(f"Aidlite library version : {aidlite.get_library_version()}")
+    # print(f"Aidlite python library version : {aidlite.get_py_library_version()}")
 
+    # resource_dir = "/home/aidlux/aidcode/"
+    # 获取资源包的共享目录（比如包里share文件夹）
+    resource_dir = get_package_share_directory('vision_perception')
+    # 资源文件夹相对于包share目录的位置
+    # resource_dir = os.path.join(pkg_share_dir, 'resource')
+
+    # 例如读取resource_dir中的文件
+    # resource_dir = os.path.join(pkg_share_dir, 'your_resource_file.txt')
+
+    config = aidlite.Config.create_instance()
+    if config is None:
+        print("Create config failed !")
+        return False
+    model_name = "cutoff_yolov5s_sigmoid_w8a8.qnn229.ctx.bin"
+    if acc_type == 1:
+        config.accelerate_type = aidlite.AccelerateType.TYPE_CPU
+    elif acc_type == 2:
+        config.accelerate_type = aidlite.AccelerateType.TYPE_GPU
+        config.is_quantify_model = 0
+    elif acc_type == 3:
+        config.accelerate_type = aidlite.AccelerateType.TYPE_DSP
+        config.is_quantify_model = 1
+    else:
+        return False
+
+    config.implement_type = aidlite.ImplementType.TYPE_LOCAL
+    config.framework_type = aidlite.FrameworkType.TYPE_QNN229
+    model_path = os.path.join(resource_dir, model_name)
+    model = aidlite.Model.create_instance(model_path)
+    if model is None:
+        print("Create model failed !")
+        return False
+    input_shapes = [[1, MODEL_SIZE, MODEL_SIZE, 3]]
+    output_shapes = [[1, 20, 20, 255], [1, 40, 40, 255], [1, 80, 80, 255]]
+    model.set_model_properties(
+        input_shapes,
+        aidlite.DataType.TYPE_FLOAT32,
+        output_shapes,
+        aidlite.DataType.TYPE_FLOAT32,
+    )
+
+    interpreter = aidlite.InterpreterBuilder.build_interpretper_from_model_and_config(
+        model, config
+    )
+    if interpreter is None:
+        print("build_interpretper_from_model_and_config failed !")
+        return None
+    result = interpreter.init()
+    if result != 0:
+        print("interpreter init failed !")
+        return False
+    result = interpreter.load_model()
+    if result != 0:
+        print("interpreter load model failed !")
+        return False
+    # print("detect model load success!")
+
+    input_tensor_info = interpreter.get_input_tensor_info()
+    if len(input_tensor_info) == 0 :
+        print("interpreter get_input_tensor_info() failed !\n")
+        return False
+    output_tensor_info = interpreter.get_output_tensor_info()
+    if len(output_tensor_info) == 0 :
+        print("interpreter get_output_tensor_info() failed !\n")
+        return False
+    stride8 = stride16 = stride32 = None
+
+    image_path = os.path.join(resource_dir, "test1.jpg")
+    frame = cv2.imread(image_path)
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    img_input, scale = eqprocess(frame, MODEL_SIZE, MODEL_SIZE)
+    img_input = img_input / 255
+    img_input = img_input.astype(np.float32)
+
+    sum_time_0 = 0.0
+    sum_time_1 = 0.0
+    sum_time_2 = 0.0
+    _counter = 10
+    for idx in range(_counter):
+        st0 = time.time()
+        input_tensor_data = img_input.data
+        # result = interpreter.set_input_tensor(0, input_tensor_data)
+        result = interpreter.set_input_tensor("images", input_tensor_data)
+        if result != 0:
+            print("interpreter set_input_tensor() failed")
+            return False
+        et0 = time.time()
+        dur0 = et0 - st0
+        sum_time_0 += dur0
+        # print(f"current [{idx}] set_input_tensor cost time :{dur0} ms")
+
+        st1 = time.time()
+        result = interpreter.invoke()
+        if result != 0:
+            # print("interpreter set_input_tensor() failed")
+            return False
+        et1 = time.time()
+        dur1 = et1 - st1
+        sum_time_1 += dur1
+        # print(f"current [{idx}] invoke cost time :{dur1} ms")
+
+        st2 = time.time()
+
+        # stride8 = interpreter.get_output_tensor(0)
+        stride8 = interpreter.get_output_tensor("_326")
+        if stride8 is None:
+            # print("sample : interpreter->get_output_tensor() 0 failed !")
+            return False
+        # print(f"len(stride8 {len(stride8)}")
+
+        # stride16 = interpreter.get_output_tensor(1)
+        stride16 = interpreter.get_output_tensor("_364")
+        if stride16 is None:
+            # print("sample : interpreter->get_output_tensor() 1 failed !")
+            return False
+        # print(f"len(stride16 {len(stride16)}")
+
+        # stride32 = interpreter.get_output_tensor(2)
+        stride32 = interpreter.get_output_tensor("_402")
+        if stride32 is None:
+            # print("sample : interpreter->get_output_tensor() 2 failed !")
+            return False
+        # print(f"len(stride32 {len(stride32)}")
+        et2 = time.time()
+        dur2 = et2 - st2
+        sum_time_2 += dur2
+        # print(f"current [{idx}] get_output_tensor cost time :{dur2} ms")
+
+    print(
+        f"repeat [{_counter}] times , input[{sum_time_0 * 1000}]ms --- invoke[{sum_time_1 * 1000}]ms --- output[{sum_time_2 * 1000}]ms --- sum[{(sum_time_0 + sum_time_1 + sum_time_2) * 1000}]ms"
+    )
+
+    stride = [8, 16, 32]
+    yolo_head = Detect(OBJ_CLASS_NUM, anchors, stride, MODEL_SIZE)
+    # 后处理部分reshape需要知道模型的output_shapes
+    validCount0 = stride8.reshape(*output_shapes[2]).transpose(0, 3, 1, 2)
+    validCount1 = stride16.reshape(*output_shapes[1]).transpose(0, 3, 1, 2)
+    validCount2 = stride32.reshape(*output_shapes[0]).transpose(0, 3, 1, 2)
+    pred = yolo_head([validCount0, validCount1, validCount2])
+    det_pred = detect_postprocess(
+        pred, frame.shape, [MODEL_SIZE, MODEL_SIZE, 3], conf_thres=0.5, iou_thres=0.45
+    )
+
+
+    # 取出所有person
+    person_det = det_pred[det_pred[:, 5] == 0]
+    det_pred = person_det
+    # 输出置信度最高的中心像素坐标（改为：面积最大的框）
+    if len(person_det) > 0:
+        # 计算每个框的面积
+        x1, y1, x2, y2 = person_det[:, 0], person_det[:, 1], person_det[:, 2], person_det[:, 3]
+        areas = (x2 - x1) * (y2 - y1)
+        # 找到面积最大的框的索引
+        best_index = np.argmax(areas)
+        # 取出面积最大的person框
+        best_person = person_det[[best_index]] # 使用 [[index]] 保持二维数组结构
+        det_pred = best_person
+        # 提取坐标并计算中心点
+        x1, y1, x2, y2 = best_person[0, :4].astype(int)
+        center_x = (x1 + x2) // 2
+        center_y = (y1 + y2) // 2
+        print(f"Person 中心坐标: ({center_x}, {center_y})")
+    else:
+         print("未检测到 person")
+
+
+
+        
+    det_pred[np.isnan(det_pred)] = 0.0
+    det_pred[:, :4] = det_pred[:, :4] * scale
+    res_img = draw_detect_res(frame, det_pred)
+
+    result = interpreter.destory()
+    if result != 0:
+        print("interpreter set_input_tensor() failed")
+        return False
+    frame_bgr = cv2.cvtColor(res_img, cv2.COLOR_RGB2BGR)
+    # result_img_path = f"{os.path.splitext(os.path.abspath(__file__))[0]}.jpg"
+    result_img_path = f"/home/aidlux/aidcode/result.jpg"
+    cv2.imwrite(result_img_path, frame_bgr)
+    print(f"The result image has been saved to : {result_img_path}")
+    return True
+
+def detect_API(frame):
+    acc_type = 3
+    # acc_type 1 cpu 2 gpu 3 npu
     aidlite.set_log_level(aidlite.LogLevel.INFO)
     aidlite.log_to_stderr()
-    print(f"Aidlite library version : {aidlite.get_library_version()}")
-    print(f"Aidlite python library version : {aidlite.get_py_library_version()}")
 
-    resource_dir = "/home/aidlux/aidcode/"
+    resource_dir = "../"
 
     config = aidlite.Config.create_instance()
     if config is None:
@@ -332,14 +513,10 @@ def main():
         config.accelerate_type = aidlite.AccelerateType.TYPE_DSP
         config.is_quantify_model = 1
     else:
-        return show_help_prompt()
+        return False
 
     config.implement_type = aidlite.ImplementType.TYPE_LOCAL
     config.framework_type = aidlite.FrameworkType.TYPE_QNN229
-
-    # model_path = os.path.join(
-    #     resource_dir, "cutoff_yolov5s_640_sigmoid_int8.serialized.bin"
-    # )
     model_path = os.path.join(resource_dir, model_name)
     model = aidlite.Model.create_instance(model_path)
     if model is None:
@@ -431,31 +608,31 @@ def main():
         # stride8 = interpreter.get_output_tensor(0)
         stride8 = interpreter.get_output_tensor("_326")
         if stride8 is None:
-            print("sample : interpreter->get_output_tensor() 0 failed !")
+            # print("sample : interpreter->get_output_tensor() 0 failed !")
             return False
-        print(f"len(stride8 {len(stride8)}")
+        # print(f"len(stride8 {len(stride8)}")
 
         # stride16 = interpreter.get_output_tensor(1)
         stride16 = interpreter.get_output_tensor("_364")
         if stride16 is None:
-            print("sample : interpreter->get_output_tensor() 1 failed !")
+            # print("sample : interpreter->get_output_tensor() 1 failed !")
             return False
-        print(f"len(stride16 {len(stride16)}")
+        # print(f"len(stride16 {len(stride16)}")
 
         # stride32 = interpreter.get_output_tensor(2)
         stride32 = interpreter.get_output_tensor("_402")
         if stride32 is None:
-            print("sample : interpreter->get_output_tensor() 2 failed !")
+            # print("sample : interpreter->get_output_tensor() 2 failed !")
             return False
-        print(f"len(stride32 {len(stride32)}")
+        # print(f"len(stride32 {len(stride32)}")
         et2 = time.time()
         dur2 = et2 - st2
         sum_time_2 += dur2
-        print(f"current [{idx}] get_output_tensor cost time :{dur2} ms")
+        # print(f"current [{idx}] get_output_tensor cost time :{dur2} ms")
 
-    print(
-        f"repeat [{_counter}] times , input[{sum_time_0 * 1000}]ms --- invoke[{sum_time_1 * 1000}]ms --- output[{sum_time_2 * 1000}]ms --- sum[{(sum_time_0 + sum_time_1 + sum_time_2) * 1000}]ms"
-    )
+    # print(
+    #     f"repeat [{_counter}] times , input[{sum_time_0 * 1000}]ms --- invoke[{sum_time_1 * 1000}]ms --- output[{sum_time_2 * 1000}]ms --- sum[{(sum_time_0 + sum_time_1 + sum_time_2) * 1000}]ms"
+    # )
 
     stride = [8, 16, 32]
     yolo_head = Detect(OBJ_CLASS_NUM, anchors, stride, MODEL_SIZE)
@@ -470,16 +647,14 @@ def main():
     det_pred[np.isnan(det_pred)] = 0.0
     det_pred[:, :4] = det_pred[:, :4] * scale
     res_img = draw_detect_res(frame, det_pred)
-
     result = interpreter.destory()
     if result != 0:
         print("interpreter set_input_tensor() failed")
         return False
-    frame_bgr = cv2.cvtColor(res_img, cv2.COLOR_RGB2BGR)
-    # result_img_path = f"{os.path.splitext(os.path.abspath(__file__))[0]}.jpg"
-    result_img_path = f"/home/aidlux/aidcode/result.jpg"
-    cv2.imwrite(result_img_path, frame_bgr)
-    print(f"The result image has been saved to : {result_img_path}")
+    # frame_bgr = cv2.cvtColor(res_img, cv2.COLOR_RGB2BGR)
+    # result_img_path = f"/home/aidlux/aidcode/result.jpg"
+    # cv2.imwrite(result_img_path, frame_bgr)
+    # print(f"The result image has been saved to : {result_img_path}")
     return True
 
 
