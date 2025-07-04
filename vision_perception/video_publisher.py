@@ -22,7 +22,7 @@ class VideoPublisher(Node):
             rclpy.shutdown()
             return
 
-        timer_period = 1/30  # 约 30 帧每秒
+        timer_period = 1/10  # 约 30 帧每秒
         self.timer = self.create_timer(timer_period, self.timer_callback)
         self.get_logger().info('视频发布节点启动 ✅')
 

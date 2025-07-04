@@ -301,21 +301,7 @@ class Detect:
 
 def main():
     acc_type = 3
-    # acc_type 1 cpu 2 gpu 3 npu
-    # aidlite.set_log_level(aidlite.LogLevel.INFO)
-    # aidlite.log_to_stderr()
-    # print(f"Aidlite library version : {aidlite.get_library_version()}")
-    # print(f"Aidlite python library version : {aidlite.get_py_library_version()}")
-
-    # resource_dir = "/home/aidlux/aidcode/"
-    # 获取资源包的共享目录（比如包里share文件夹）
     resource_dir = get_package_share_directory('vision_perception')
-    # 资源文件夹相对于包share目录的位置
-    # resource_dir = os.path.join(pkg_share_dir, 'resource')
-
-    # 例如读取resource_dir中的文件
-    # resource_dir = os.path.join(pkg_share_dir, 'your_resource_file.txt')
-
     config = aidlite.Config.create_instance()
     if config is None:
         print("Create config failed !")
