@@ -132,6 +132,10 @@ class YOLODetectorNode(Node):
 
     def init_model(self):
         resource_dir = get_package_share_directory('vision_perception')
+        # aidlite.set_log_level(aidlite.LogLevel.INFO)
+        # 设置仅输出错误及以上级别的日志，屏蔽 INFO 和 DEBUG
+        aidlite.set_log_level(aidlite.LogLevel.ERROR)
+        aidlite.log_to_stderr()
         self.config = aidlite.Config.create_instance()
         if self.config is None:
             self.get_logger().error("Create config failed!")
@@ -195,88 +199,56 @@ class YOLODetectorNode(Node):
     def image_callback(self, msg):
         if not self.active:
             return  # 控制识别开关
-        self.get_logger().info("YOLO detect_test.")
+        # self.get_logger().info("YOLO detect_test.")
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         bbox = self.detect_person(frame)
         if bbox:
-            x_min, y_min, x_max, y_max = bbox
+            x,y,w,h = bbox  #x,y是左上角坐标，w,h是宽高
+            # //?输出中心点坐标，但是出现问题，center数据类型转换问题         
             center = PointStamped()
             center.header = msg.header  # 记得设置时间戳和坐标系
-            center.point.x = (x_min + x_max) / 2
-            center.point.y = (y_min + y_max) / 2
+            center.point.x = float(x + w / 2)
+            center.point.y = float(y + h / 2)
             center.point.z = 0.0
             self.publisher.publish(center)
-            self.get_logger().info(f" 正在检测中，检测中心位置：({center.point.x:.1f}, {center.point.y:.1f})")
+            self.get_logger().info(f"人物中心位置：({center.point.x:.1f}, {center.point.y:.1f})")
 
             # 可选：画出检测框并发布图像
-            cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0,255,0), 2)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (0,255,0), 2)
             out_img = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
             out_img.header = msg.header
             self.image_pub.publish(out_img)
+            # #show
+            # cv2.imshow("detect_result", frame)
 
     def detect_person(self, frame):
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img_input, scale = eqprocess(frame, self.model_size, self.model_size)
         img_input = img_input / 255
         img_input = img_input.astype(np.float32)
-
-        # sum_time_0 = 0.0
-        # sum_time_1 = 0.0
-        # sum_time_2 = 0.0
-        _counter = 10
-        for idx in range(_counter):
-            # st0 = time.time()
-            input_tensor_data = img_input.data
-            # result = interpreter.set_input_tensor(0, input_tensor_data)
-            result = self.interpreter.set_input_tensor("images", input_tensor_data)
-            if result != 0:
-                print("interpreter set_input_tensor() failed")
-                return False
-            # et0 = time.time()
-            # dur0 = et0 - st0
-            # sum_time_0 += dur0
-            # print(f"current [{idx}] set_input_tensor cost time :{dur0} ms")
-
-            # st1 = time.time()
-            # result = interpreter.invoke()
-            if result != 0:
-                print("interpreter set_input_tensor() failed")
-                return False
-            # et1 = time.time()
-            # dur1 = et1 - st1
-            # sum_time_1 += dur1
-            # print(f"current [{idx}] invoke cost time :{dur1} ms")
-
-            # st2 = time.time()
-
-            # stride8 = interpreter.get_output_tensor(0)
-            stride8 = self.interpreter.get_output_tensor("_326")
-            if stride8 is None:
-                # print("sample : interpreter->get_output_tensor() 0 failed !")
-                return False
-            # print(f"len(stride8 {len(stride8)}")
-
-            # stride16 = interpreter.get_output_tensor(1)
-            stride16 = self.interpreter.get_output_tensor("_364")
-            if stride16 is None:
-                # print("sample : interpreter->get_output_tensor() 1 failed !")
-                return False
-            # print(f"len(stride16 {len(stride16)}")
-
-            # stride32 = interpreter.get_output_tensor(2)
-            stride32 = self.interpreter.get_output_tensor("_402")
-            if stride32 is None:
-                # print("sample : interpreter->get_output_tensor() 2 failed !")
-                return False
-            # print(f"len(stride32 {len(stride32)}")
-            # et2 = time.time()
-            # dur2 = et2 - st2
-            # sum_time_2 += dur2
-            # print(f"current [{idx}] get_output_tensor cost time :{dur2} ms")
-
-        # print(
-        #     f"repeat [{_counter}] times , input[{sum_time_0 * 1000}]ms --- invoke[{sum_time_1 * 1000}]ms --- output[{sum_time_2 * 1000}]ms --- sum[{(sum_time_0 + sum_time_1 + sum_time_2) * 1000}]ms"
-        # )
+        # print("img_input.shape:", img_input.shape)
+        
+        input_tensor_data = img_input.data
+        result = self.interpreter.set_input_tensor("images", input_tensor_data)
+        result = self.interpreter.invoke()
+        if result != 0:
+            print("interpreter set_input_tensor() failed")
+            return False
+        if result != 0:
+            print("interpreter set_input_tensor() failed")
+            return False
+        stride8 = self.interpreter.get_output_tensor("_326")
+        if stride8 is None:
+            print("sample : interpreter->get_output_tensor() 0 failed !")
+            return False
+        stride16 = self.interpreter.get_output_tensor("_364")
+        if stride16 is None:
+            print("sample : interpreter->get_output_tensor() 1 failed !")
+            return False
+        stride32 = self.interpreter.get_output_tensor("_402")
+        if stride32 is None:
+            print("sample : interpreter->get_output_tensor() 2 failed !")
+            return False
 
         stride = [8, 16, 32]
         yolo_head = Detect(self.obj_class_num, self.anchors, stride, self.model_size)
@@ -288,56 +260,62 @@ class YOLODetectorNode(Node):
         det_pred = detect_postprocess(
             pred, frame.shape, [self.model_size, self.model_size, 3], conf_thres=0.5, iou_thres=0.45
         )
-
-
+        # print("原始预测框数量：", len(det_pred))
         # 取出所有person
         person_det = det_pred[det_pred[:, 5] == 0]
         det_pred = person_det
         # 输出置信度最高的中心像素坐标（改为：面积最大的框）
         if len(person_det) > 0:
-            # 计算每个框的面积
-            x1, y1, x2, y2 = person_det[:, 0], person_det[:, 1], person_det[:, 2], person_det[:, 3]
+            # 先将 xywh 转换为 xyxy
+            boxes_xyxy = xywh2xyxy(person_det[:, :4])
+            # 提取 x1, y1, x2, y2
+            x1 = boxes_xyxy[:, 0]
+            y1 = boxes_xyxy[:, 1]
+            x2 = boxes_xyxy[:, 2]
+            y2 = boxes_xyxy[:, 3]        
             areas = (x2 - x1) * (y2 - y1)
             # 找到面积最大的框的索引
             best_index = np.argmax(areas)
             # 取出面积最大的person框
-            best_person = person_det[[best_index]] # 使用 [[index]] 保持二维数组结构
+            best_person = person_det[[best_index]]  # 使用 [[index]] 保持二维数组结构
             det_pred = best_person
-            # 提取坐标并计算中心点
-            x1, y1, x2, y2 = best_person[0, :4].astype(int)
-            center_x = (x1 + x2) // 2
-            center_y = (y1 + y2) // 2
-            print(f"Person 中心坐标: ({center_x}, {center_y})")
         else:
-            print("未检测到 person")
-
-
-
-            
+            self.get_logger().info("未检测到 person")
+            return None  # 直接退出，防止后续访问 det_pred[0]
+        
         det_pred[np.isnan(det_pred)] = 0.0
         det_pred[:, :4] = det_pred[:, :4] * scale
-        res_img = draw_detect_res(self,frame, det_pred)
+        # 提取坐标并计算中心点
+        x, y, w, h = det_pred[0, :4].astype(int) 
+        # res_img = draw_detect_res(self,frame, det_pred)
 
-        result = self.interpreter.destory()
-        if result != 0:
-            print("interpreter set_input_tensor() failed")
-            return False
+        # result = self.interpreter.destory()
+        # if result != 0:
+        #     print("interpreter set_input_tensor() failed")
+        #     return False
         # frame_bgr = cv2.cvtColor(res_img, cv2.COLOR_RGB2BGR)
         # result_img_path = f"{os.path.splitext(os.path.abspath(__file__))[0]}.jpg"
         # result_img_path = f"/home/aidlux/aidcode/result.jpg"
         # cv2.imwrite(result_img_path, frame_bgr)
         # print(f"The result image has been saved to : {result_img_path}")
-        return [100, 150, 80, 160]  # 实际调用模型推理结果
+        return [x, y, w, h]  # 实际调用模型推理结果
         
+    def destroy_node(self):
+        # 先销毁 interpreter
+        if hasattr(self, "interpreter"):
+            result = self.interpreter.destory()
+            if result != 0:
+                self.get_logger().warn("Failed to destroy interpreter.")
+            else:
+                self.get_logger().info("Interpreter destroyed.")
+        # 再调用父类销毁
+        super().destroy_node()
 def main(args=None):
     rclpy.init(args=args)
     node = YOLODetectorNode()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
-
-
-
 
 
 def eqprocess(image, size1, size2):

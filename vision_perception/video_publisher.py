@@ -12,7 +12,7 @@ class VideoPublisher(Node):
         self.publisher = self.create_publisher(Image, '/camera/image_raw', 10)
         self.bridge = CvBridge()
         resource_dir = get_package_share_directory('vision_perception')
-        video_name = 'testvideo1.mp4'
+        video_name = 'testvideo2.mp4'
         video_path = os.path.join(resource_dir, video_name)
         # video_path = '/home/aidlux/aidcode/test_ws/src/vision_perception/vision_perception/testvideo1.mp4'  # 修改为你的视频绝对路径
         self.cap = cv2.VideoCapture(video_path)
@@ -22,7 +22,7 @@ class VideoPublisher(Node):
             rclpy.shutdown()
             return
 
-        timer_period = 1/10  # 约 30 帧每秒
+        timer_period = 1/10  # 约 10 帧每秒
         self.timer = self.create_timer(timer_period, self.timer_callback)
         self.get_logger().info('视频发布节点启动 ✅')
 
